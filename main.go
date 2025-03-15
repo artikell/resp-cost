@@ -182,7 +182,7 @@ func flushDatabase(ctx context.Context, rdb *redis.Client) error {
 				continue
 			}
 		}
-		if useMemory > 5*1024*1024 {
+		if useMemory > 1.5*1024*1024 {
 			continue
 		}
 		break
