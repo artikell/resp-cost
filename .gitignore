@@ -1,3 +1,5 @@
 resp-cost
 go.sum
 main
+db/*/vendor
+db/*/data/

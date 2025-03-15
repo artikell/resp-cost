@@ -1,4 +1,4 @@
-REDIS_VERSION := 4.0
+REDIS_VERSION := 5.0
 REDIS_SOURCE_URL := https://github.com/redis/redis.git
 BUILD_DIR := vendor/redis
 DATA_DIR := data/
