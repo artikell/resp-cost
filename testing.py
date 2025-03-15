@@ -8,43 +8,43 @@ import json
 TEST_GROUPS = [
     {
         'type': 'string',
-        'key_counts': range(10000, 1000000, 10000),
+        'key_counts': [10000, 40000, 80000, 160000],
         'field_counts': [0],
         'field_sizes': [0],
         'key_sizes': [16],
-        'value_sizes': [16, 64, 128, 256, 512, 1024, 2048, 4096],
+        'value_sizes': [32, 64, 128, 256],
     },
     {
         'type': 'hash',
-        'key_counts': range(10000, 1000000, 10000),
-        'field_counts': [10, 100, 1000, 10000],
+        'key_counts': [10000, 40000, 80000],
+        'field_counts': [10, 100, 200],
         'field_sizes': [16],
         'key_sizes': [16],
-        'value_sizes': [16, 64, 128, 256, 512, 1024, 2048, 4096],
+        'value_sizes': [16, 64, 128],
     },
     {
         'type': 'list',
-        'key_counts': range(10000, 1000000, 10000),
-        'field_counts': [10, 100, 1000, 10000],
-        'field_sizes': [16],
+        'key_counts': [10000, 40000, 80000],
+        'field_counts': [10, 100, 200],
+        'field_sizes': [16, 64, 128],
         'key_sizes': [16],
-        'value_sizes': [16, 64, 128, 256, 512, 1024, 2048, 4096],
+        'value_sizes': [16],
     },
     {
         'type': 'set',
-        'key_counts': range(10000, 1000000, 10000),
-        'field_counts': [10, 100, 1000, 10000],
-        'field_sizes': [16],
+        'key_counts': [10000, 40000, 80000],
+        'field_counts': [10, 100, 200],
+        'field_sizes': [16, 64, 128],
         'key_sizes': [16],
-        'value_sizes': [16, 64, 128, 256, 512, 1024, 2048, 4096],
+        'value_sizes': [16],
     },
     {
         'type':'zset',
-        'key_counts': range(10000, 1000000, 10000),
-        'field_counts': [10, 100, 1000, 10000],
-        'field_sizes': [16],
+        'key_counts': [10000, 40000, 80000],
+        'field_counts': [10, 100, 200],
+        'field_sizes': [16, 64, 128],
         'key_sizes': [16],
-        'value_sizes': [16, 64, 128, 256, 512, 1024, 2048, 4096],
+        'value_sizes': [16],
     }
 ]
 
@@ -121,10 +121,13 @@ def main():
             
             # 执行测试
             result = run_command({k:v for k,v in params.items() if v is not None}, global_args)
+            
+            if result is None:
+                continue
 
             params.update(result)
             params['target'] = global_args.target
-            print(json.dumps(params))
+            print(json.dumps(params), flush=True)
 
 if __name__ == "__main__":
     main()

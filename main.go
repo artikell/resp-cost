@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/spf13/cobra"
@@ -37,6 +39,7 @@ const (
 var (
 	dbEnv        DatabaseEnv
 	dataTemplate DataTemplate
+	shardValue   []sync.Map
 )
 
 func newRedisClient() *redis.Client {
@@ -61,54 +64,25 @@ var rootCmd = &cobra.Command{
 	Short: "Redis数据生成工具",
 }
 
-// 生成唯一字符串（添加在 randomString 函数附近）
+// 生成唯一字符串
 func getUniqueString(num int, length int) string {
-	const base62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-
-	// 处理边界情况
-	if num < 0 {
-		num = -num
-	}
-	if length <= 0 {
-		return ""
+	if len(shardValue) <= length {
+		newShardValue := make([]sync.Map, length+1)
+		copy(newShardValue, shardValue)
+		shardValue = newShardValue
 	}
 
-	// 转换数字为base62
-	var result []byte
-	for num > 0 && len(result) < length {
-		remainder := num % 62
-		result = append([]byte{base62[remainder]}, result...)
-		num = num / 62
+	shard := shardValue[length]
+	if _, ok := shard.Load(num); !ok {
+		format := "%" + strconv.Itoa(length) + "d"
+		shard.Store(num, fmt.Sprintf(format, num))
 	}
-
-	// 前补零到指定长度
-	for len(result) < length {
-		result = append([]byte{'0'}, result...)
-	}
-
-	// 保持长度一致性
-	return string(result[:length])
+	v, _ := shard.Load(num)
+	return v.(string)
 }
 
 func minLengthForUniqueness(num int) int {
-	if num == 0 {
-		return 1
-	}
-
-	// 计算公式：62^(n-1) <= num < 62^n
-	n := 1
-	maxValue := 62
-	for {
-		if num < maxValue {
-			return n
-		}
-		maxValue *= 62
-		n++
-		// 防止溢出
-		if maxValue > int(^uint(0)>>1) {
-			return -1 // 超出系统最大整数范围
-		}
-	}
+	return len(strconv.Itoa(num))
 }
 
 // 检查是否可保证唯一性
@@ -116,27 +90,25 @@ func isLengthSufficient(num, length int) bool {
 	return length >= minLengthForUniqueness(num)
 }
 
-func populateData(ctx context.Context, rdb *redis.Client) error {
+func populateData(ctx context.Context, rdb *redis.Client, dt *DataTemplate, waitGroup *sync.WaitGroup, ds int, de int) error {
 	// init vars
-	keyCount := dataTemplate.KeyCount
-	keySize := dataTemplate.KeySize
-	fieldCount := dataTemplate.FieldCount
-	fieldSize := dataTemplate.FieldSize
-	valueSize := dataTemplate.ValueSize
-	dataType := dataTemplate.Type
+	keySize := dt.KeySize
+	fieldCount := dt.FieldCount
+	fieldSize := dt.FieldSize
+	valueSize := dt.ValueSize
+	dataType := dt.Type
 
 	switch dataType {
 	case DataTypeString:
-		for i := 0; i < keyCount; i++ {
+		for i := ds; i < de; i++ {
 			key := getUniqueString(i, keySize)
-			value := randomString(valueSize)
+			value := getUniqueString(i, valueSize)
 			if err := rdb.Set(ctx, key, value, 0).Err(); err != nil {
 				return err
 			}
 		}
-
 	case DataTypeHash:
-		for i := 0; i < keyCount; i++ {
+		for i := ds; i < de; i++ {
 			key := getUniqueString(i, keySize)
 			fields := make(map[string]interface{}, fieldCount)
 			for j := 0; j < fieldCount; j++ {
@@ -148,7 +120,7 @@ func populateData(ctx context.Context, rdb *redis.Client) error {
 		}
 
 	case DataTypeList:
-		for i := 0; i < keyCount; i++ {
+		for i := ds; i < de; i++ {
 			key := getUniqueString(i, keySize)
 			values := make([]interface{}, fieldCount)
 			for j := 0; j < fieldCount; j++ {
@@ -160,7 +132,7 @@ func populateData(ctx context.Context, rdb *redis.Client) error {
 		}
 
 	case DataTypeSet:
-		for i := 0; i < keyCount; i++ {
+		for i := ds; i < de; i++ {
 			key := getUniqueString(i, keySize)
 			members := make([]interface{}, fieldCount)
 			for j := 0; j < fieldCount; j++ {
@@ -172,7 +144,7 @@ func populateData(ctx context.Context, rdb *redis.Client) error {
 		}
 
 	case DataTypeZSet:
-		for i := 0; i < keyCount; i++ {
+		for i := ds; i < de; i++ {
 			key := getUniqueString(i, keySize)
 			members := make([]*redis.Z, fieldCount)
 			for j := 0; j < fieldCount; j++ {
@@ -192,6 +164,33 @@ func populateData(ctx context.Context, rdb *redis.Client) error {
 	return nil
 }
 
+func flushDatabase(ctx context.Context, rdb *redis.Client) error {
+	err := rdb.FlushAll(ctx).Err()
+	if err != nil {
+		return err
+	}
+	var usedBefore, usedAfter uint64
+	for {
+		// 获取flush后的内存使用情况
+		infoAfter, err := rdb.Info(ctx, "memory").Result()
+		if err != nil {
+			return err
+		}
+		for _, line := range strings.Split(infoAfter, "\r\n") {
+			if strings.HasPrefix(line, "used_memory:") {
+				fmt.Sscanf(line, "used_memory:%d", &usedAfter)
+				break
+			}
+		}
+		if usedBefore*100 > usedAfter*5 {
+			usedBefore = usedAfter
+			continue
+		}
+		break
+	}
+	return nil
+}
+
 func populateCommand(cmd *cobra.Command, args []string) error {
 	if !isLengthSufficient(dataTemplate.KeyCount, dataTemplate.KeySize) {
 		return fmt.Errorf("key-count: %d, key-size: %d, 不满足唯一性要求\n", dataTemplate.KeyCount, dataTemplate.KeySize)
@@ -204,17 +203,51 @@ func populateCommand(cmd *cobra.Command, args []string) error {
 	rdb := newRedisClient()
 
 	if dbEnv.IsEmpty {
-		rdb.FlushAll(cmd.Context())
+		flushDatabase(cmd.Context(), rdb)
 	}
 
-	err := populateData(cmd.Context(), rdb)
-	if err != nil {
-		return err
+	wg := sync.WaitGroup{}
+	goroutineCount := 12
+	keyPreRound := dataTemplate.KeyCount / goroutineCount
+	for i := 0; i < dataTemplate.KeyCount; {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ds := i
+			de := i + keyPreRound
+			err := populateData(cmd.Context(), rdb, &dataTemplate, &wg, ds, de)
+			if err != nil {
+				panic(err)
+			}
+		}(i)
+		i = i + keyPreRound
 	}
+	for i := 0; i < goroutineCount; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ds := i * dataTemplate.KeyCount / goroutineCount
+			de := (i + 1) * dataTemplate.KeyCount / goroutineCount
+			err := populateData(cmd.Context(), rdb, &dataTemplate, &wg, ds, de)
+			if err != nil {
+				panic(err)
+			}
+		}(i)
+	}
+	wg.Wait()
 
-	// Scan all keys
-	for i := 0; i < dataTemplate.KeyCount; i++ {
-		rdb.Type(cmd.Context(), getUniqueString(i, dataTemplate.KeySize))
+	// 使用 SCAN 命令遍历所有 key
+	var cursor uint64 = 0
+	for {
+		var err error
+		_, cursor, err = rdb.Scan(cmd.Context(), cursor, "*", int64(dataTemplate.KeyCount)).Result()
+		if err != nil {
+			return err
+		}
+
+		if cursor == 0 {
+			break
+		}
 	}
 
 	info, err := rdb.Info(cmd.Context(), "memory").Result()
@@ -247,6 +280,8 @@ var populateCmd = &cobra.Command{
 }
 
 func main() {
+	shardValue = make([]sync.Map, 10)
+
 	populateCmd.Flags().StringVarP(&dbEnv.Type, "db-type", "T", "redis", "数据库类型(当前仅支持redis)")
 	populateCmd.Flags().StringVarP(&dbEnv.Addr, "addr", "a", "localhost:6379", "服务器地址(格式: host:port)")
 	populateCmd.Flags().StringVarP(&dbEnv.Password, "password", "p", "", "认证密码")
