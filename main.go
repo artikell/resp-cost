@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/rand"
 	"strings"
 
@@ -151,9 +150,9 @@ func populateData(ctx context.Context, rdb *redis.Client) error {
 	case DataTypeList:
 		for i := 0; i < keyCount; i++ {
 			key := getUniqueString(i, keySize)
-			values := make([]interface{}, valueSize)
-			for j := 0; j < valueSize; j++ {
-				values[j] = getUniqueString(j, valueSize)
+			values := make([]interface{}, fieldCount)
+			for j := 0; j < fieldCount; j++ {
+				values[j] = getUniqueString(j, fieldSize)
 			}
 			if err := rdb.RPush(ctx, key, values...).Err(); err != nil {
 				return err
@@ -163,9 +162,9 @@ func populateData(ctx context.Context, rdb *redis.Client) error {
 	case DataTypeSet:
 		for i := 0; i < keyCount; i++ {
 			key := getUniqueString(i, keySize)
-			members := make([]interface{}, valueSize)
-			for j := 0; j < valueSize; j++ {
-				members[j] = getUniqueString(j, valueSize)
+			members := make([]interface{}, fieldCount)
+			for j := 0; j < fieldCount; j++ {
+				members[j] = getUniqueString(j, fieldSize)
 			}
 			if err := rdb.SAdd(ctx, key, members...).Err(); err != nil {
 				return err
@@ -175,11 +174,11 @@ func populateData(ctx context.Context, rdb *redis.Client) error {
 	case DataTypeZSet:
 		for i := 0; i < keyCount; i++ {
 			key := getUniqueString(i, keySize)
-			members := make([]*redis.Z, valueSize)
-			for j := 0; j < valueSize; j++ {
+			members := make([]*redis.Z, fieldCount)
+			for j := 0; j < fieldCount; j++ {
 				members[j] = &redis.Z{
 					Score:  float64(j),
-					Member: getUniqueString(j, valueSize),
+					Member: getUniqueString(j, fieldSize),
 				}
 			}
 			if err := rdb.ZAdd(ctx, key, members...).Err(); err != nil {
@@ -195,10 +194,11 @@ func populateData(ctx context.Context, rdb *redis.Client) error {
 
 func populateCommand(cmd *cobra.Command, args []string) error {
 	if !isLengthSufficient(dataTemplate.KeyCount, dataTemplate.KeySize) {
-		fmt.Printf("key-count: %d, key-size: %d, 不满足唯一性要求\n", dataTemplate.KeyCount, dataTemplate.KeySize)
+		return fmt.Errorf("key-count: %d, key-size: %d, 不满足唯一性要求\n", dataTemplate.KeyCount, dataTemplate.KeySize)
 	}
-	if !isLengthSufficient(dataTemplate.FieldCount, dataTemplate.FieldSize) {
-		fmt.Printf("field-count: %d, field-size: %d, 不满足唯一性要求\n", dataTemplate.FieldCount, dataTemplate.FieldSize)
+	if (dataTemplate.Type != DataTypeString) &&
+		!isLengthSufficient(dataTemplate.FieldCount, dataTemplate.FieldSize) {
+		return fmt.Errorf("field-count: %d, field-size: %d, 不满足唯一性要求\n", dataTemplate.FieldCount, dataTemplate.FieldSize)
 	}
 
 	rdb := newRedisClient()
@@ -212,6 +212,7 @@ func populateCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Scan all keys
 	for i := 0; i < dataTemplate.KeyCount; i++ {
 		rdb.Type(cmd.Context(), getUniqueString(i, dataTemplate.KeySize))
 	}
@@ -233,7 +234,7 @@ func populateCommand(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	log.Printf("used_memory: %d, total_system_memory: %d, maxmemory: %d\n", used, total, max)
+	fmt.Printf("used_memory: %d, total_system_memory: %d, maxmemory: %d\n", used, total, max)
 
 	return nil
 }
