@@ -90,7 +90,7 @@ func isLengthSufficient(num, length int) bool {
 	return length >= minLengthForUniqueness(num)
 }
 
-func populateData(ctx context.Context, rdb *redis.Client, dt *DataTemplate, waitGroup *sync.WaitGroup, ds int, de int) error {
+func populateData(ctx context.Context, rdb *redis.Client, dt *DataTemplate, ds int, de int) error {
 	// init vars
 	keySize := dt.KeySize
 	fieldCount := dt.FieldCount
@@ -169,7 +169,7 @@ func flushDatabase(ctx context.Context, rdb *redis.Client) error {
 	if err != nil {
 		return err
 	}
-	var usedBefore, usedAfter uint64
+	var useMemory uint64
 	for {
 		// 获取flush后的内存使用情况
 		infoAfter, err := rdb.Info(ctx, "memory").Result()
@@ -178,12 +178,11 @@ func flushDatabase(ctx context.Context, rdb *redis.Client) error {
 		}
 		for _, line := range strings.Split(infoAfter, "\r\n") {
 			if strings.HasPrefix(line, "used_memory:") {
-				fmt.Sscanf(line, "used_memory:%d", &usedAfter)
-				break
+				fmt.Sscanf(line, "used_memory:%d", &useMemory)
+				continue
 			}
 		}
-		if usedBefore*100 > usedAfter*5 {
-			usedBefore = usedAfter
+		if useMemory > 5*1024*1024 {
 			continue
 		}
 		break
@@ -215,24 +214,12 @@ func populateCommand(cmd *cobra.Command, args []string) error {
 			defer wg.Done()
 			ds := i
 			de := i + keyPreRound
-			err := populateData(cmd.Context(), rdb, &dataTemplate, &wg, ds, de)
+			err := populateData(cmd.Context(), rdb, &dataTemplate, ds, de)
 			if err != nil {
 				panic(err)
 			}
 		}(i)
 		i = i + keyPreRound
-	}
-	for i := 0; i < goroutineCount; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			ds := i * dataTemplate.KeyCount / goroutineCount
-			de := (i + 1) * dataTemplate.KeyCount / goroutineCount
-			err := populateData(cmd.Context(), rdb, &dataTemplate, &wg, ds, de)
-			if err != nil {
-				panic(err)
-			}
-		}(i)
 	}
 	wg.Wait()
 
