@@ -5,48 +5,7 @@ from datetime import datetime
 import argparse
 import json
 
-TEST_GROUPS = [
-    {
-        'type': 'string',
-        'key_counts': [40000, 160000],
-        'field_counts': [0],
-        'field_sizes': [0],
-        'key_sizes': [16],
-        'value_sizes': [32, 128, 512],
-    },
-    {
-        'type': 'hash',
-        'key_counts': [40000, 160000],
-        'field_counts': [10, 100, 200],
-        'field_sizes': [16],
-        'key_sizes': [16],
-        'value_sizes': [16, 128],
-    },
-    {
-        'type': 'list',
-        'key_counts': [40000, 160000],
-        'field_counts': [10, 100, 200],
-        'field_sizes': [16, 128],
-        'key_sizes': [16],
-        'value_sizes': [16],
-    },
-    {
-        'type': 'set',
-        'key_counts': [40000, 160000],
-        'field_counts': [10, 100, 200],
-        'field_sizes': [16, 128],
-        'key_sizes': [16],
-        'value_sizes': [16],
-    },
-    {
-        'type':'zset',
-        'key_counts': [40000, 160000],
-        'field_counts': [10, 100, 200],
-        'field_sizes': [16, 128],
-        'key_sizes': [16],
-        'value_sizes': [16],
-    }
-]
+TEST_GROUPS = json.load(open('./case.json'))
 
 def parse_args():
     parser = argparse.ArgumentParser()
